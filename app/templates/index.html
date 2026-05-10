@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>청년 정책 XAI 상담소</title>
+    <link rel="stylesheet" href="/static/css/chat.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+</head>
+<body>
+    <div class="app">
+        <aside class="conversation-panel">
+            <div class="conversation-panel__header">
+                <button id="conversation-close" class="conversation-close" type="button" aria-label="채팅목록 닫기">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+
+                <div class="conversation-panel__title-wrap">
+                    <span class="conversation-panel__eyebrow">Chats</span>
+                    <h2 class="conversation-panel__title">대화 목록</h2>
+                </div>
+
+                <button id="new-chat-btn" class="new-chat-btn" type="button">
+                    <i class="fa-solid fa-plus"></i>
+                    <span>새 채팅</span>
+                </button>
+            </div>
+
+            <div id="conversation-list" class="conversation-list">
+                <div class="conversation-empty">
+                    저장된 대화가 여기에 표시됩니다.
+                </div>
+            </div>
+        </aside>
+
+        <section class="main">
+            <header class="topbar">
+                <div class="topbar__left">
+                    <div class="topbar__title">
+                        <i class="fa-solid fa-sparkles"></i>
+                        <span id="current-chat-title" class="topbar__title-text">청년 정책 XAI 상담 채팅</span>
+                    </div>
+                    <p class="topbar__desc">
+                        질문을 입력하면 정책 답변과 함께, 입력 문장에서 중요하게 작용한 단어를 색으로 확인할 수 있습니다.
+                    </p>
+                </div>
+
+                <div class="topbar__actions">
+                    <button
+                        id="conversation-toggle-btn"
+                        class="conversation-toggle-btn"
+                        type="button"
+                        aria-label="채팅목록 열기"
+                        aria-expanded="false"
+                    >
+                        <span>채팅목록</span>
+                        <i class="fa-solid fa-bars-staggered"></i>
+                    </button>
+
+                    <button id="help-btn" class="help-btn" type="button" aria-label="도움말 열기" aria-expanded="false">
+                        <span>도움말</span>
+                        <i class="fa-solid fa-circle-question"></i>
+                    </button>
+
+                    <button id="reset-btn" class="reset-btn" type="button">
+                        <i class="fa-solid fa-rotate-right"></i>
+                        새 대화 시작
+                    </button>
+                </div>
+            </header>
+
+            <main id="chat-window" class="chat-area">
+                <div class="intro-card fade-in">
+                    <div class="intro-card__badge">
+                        <i class="fa-solid fa-circle-info"></i>
+                        <span>상담 안내</span>
+                    </div>
+                    <h3>안녕하세요. 어떤 정책 지원이 필요한지 편하게 물어보세요.</h3>
+                    <p>
+                        예를 들어 나이, 지역, 현재 상황을 함께 적어주시면 더 적절한 정책을 추천할 수 있어요.
+                        예: “서울 거주 24세 대학생인데 자격증 응시료 지원이 궁금해요.”
+                    </p>
+                </div>
+
+                <div id="messages" class="messages"></div>
+            </main>
+
+            <footer class="composer">
+                <div class="composer__hint">
+                    민감한 개인정보는 입력하지 말고, 필요한 상황 정보만 적어주세요.
+                </div>
+                <form id="chat-form" class="composer-form">
+                    <div class="input-shell">
+                        <textarea
+                            id="user-input"
+                            class="composer-input"
+                            rows="1"
+                            placeholder="예: 서울 거주 25세 취업준비생인데 면접정장 대여나 구직지원금이 궁금해요."
+                        ></textarea>
+                    </div>
+                    <button id="send-btn" class="send-btn" type="submit" aria-label="보내기">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </form>
+            </footer>
+        </section>
+
+        <aside class="sidebar">
+            <button id="sidebar-close" class="sidebar-close" type="button" aria-label="도움말 닫기">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+            <div class="brand">
+                <div class="brand__logo">
+                    <i class="fa-solid fa-comments-dollar"></i>
+                </div>
+                <div class="brand__text">
+                    <h1>청년 정책 XAI 상담소</h1>
+                    <p>Qdrant + Qwen + Captum 기반 정책 상담</p>
+                </div>
+            </div>
+
+            <section class="status-card">
+                <div class="status-row">
+                    <div class="status-title">상담 상태</div>
+                    <div class="live-pill">
+                        <span class="live-pill__dot"></span>
+                        실행 중
+                    </div>
+                </div>
+                <p class="status-desc">
+                    질문 내용에 맞는 정책 정보를 분석해 답변하고,
+                    입력 질문에서 중요하게 본 단어를 색으로 보여줍니다.
+                </p>
+            </section>
+
+            <section class="guide-card">
+                <h2>질문 팁</h2>
+                <ul class="guide-list">
+                    <li class="guide-item">
+                        <span class="guide-icon"><i class="fa-solid fa-user"></i></span>
+                        <span>나이와 학생·취업준비·재직 여부를 함께 적어보세요.</span>
+                    </li>
+                    <li class="guide-item">
+                        <span class="guide-icon"><i class="fa-solid fa-location-dot"></i></span>
+                        <span>지역 정보를 넣으면 지자체 정책까지 더 정확히 찾을 수 있어요.</span>
+                    </li>
+                    <li class="guide-item">
+                        <span class="guide-icon"><i class="fa-solid fa-wallet"></i></span>
+                        <span>주거, 자격증, 창업, 면접, 월세처럼 상황을 구체적으로 적어주세요.</span>
+                    </li>
+                </ul>
+            </section>
+
+            <section class="example-card">
+                <h2>예시 질문</h2>
+                <ul class="example-list">
+                    <li class="example-item">
+                        <span class="example-icon"><i class="fa-solid fa-graduation-cap"></i></span>
+                        <span>대학생이 받을 수 있는 등록금·자격증 지원이 궁금해요.</span>
+                    </li>
+                    <li class="example-item">
+                        <span class="example-icon"><i class="fa-solid fa-house"></i></span>
+                        <span>서울 사는 20대 청년이 신청할 만한 월세 지원이 있을까요?</span>
+                    </li>
+                    <li class="example-item">
+                        <span class="example-icon"><i class="fa-solid fa-briefcase"></i></span>
+                        <span>취업 준비 중인데 면접정장 대여나 구직 지원금을 알고 싶어요.</span>
+                    </li>
+                </ul>
+                <div class="example-chip-wrap">
+                    <button class="example-chip" type="button">자격증 지원</button>
+                    <button class="example-chip" type="button">월세 지원</button>
+                    <button class="example-chip" type="button">취업 지원</button>
+                    <button class="example-chip" type="button">창업 지원</button>
+                    <button class="example-chip" type="button">자산 형성</button>
+                </div>
+            </section>
+        </aside>
+
+        <div id="conversation-backdrop" class="conversation-backdrop"></div>
+        <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+    </div>
+
+    <div id="delete-modal" class="delete-modal" hidden>
+        <div id="delete-backdrop" class="delete-modal__backdrop"></div>
+
+        <div class="delete-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+            <div class="delete-modal__header">
+                <h3 id="delete-title">대화 삭제</h3>
+                <button id="delete-close" class="delete-modal__close" type="button" aria-label="닫기">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="delete-modal__body">
+                <p id="delete-description" class="delete-modal__description">
+                    이 대화를 삭제할까요?
+                </p>
+                <p class="delete-modal__note">
+                    삭제하면 되돌릴 수 없습니다.
+                </p>
+            </div>
+
+            <div class="delete-modal__footer">
+                <button id="delete-cancel" class="delete-modal__cancel" type="button">취소</button>
+                <button id="delete-confirm" class="delete-modal__confirm" type="button">삭제</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="heatmap-modal" class="heatmap-modal" hidden>
+        <div id="heatmap-backdrop" class="heatmap-modal__backdrop"></div>
+
+        <div class="heatmap-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="heatmap-title">
+            <div class="heatmap-modal__header">
+                <h3 id="heatmap-title">질문 중요도 히트맵</h3>
+                <button id="heatmap-close" class="heatmap-modal__close" type="button" aria-label="닫기">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="heatmap-modal__body">
+                <div id="heatmap-content"></div>
+                <p class="heatmap-modal__note">
+                    Captum 기준으로 입력 질문에서 상대적으로 중요한 단어를 그래프 형태로 보여줍니다.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/chat.js"></script>
+</body>
+</html>
