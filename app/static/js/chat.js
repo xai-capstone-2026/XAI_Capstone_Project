@@ -770,69 +770,271 @@ function updateUserMessageWithCaptum(id, originalMessage, captumResult) {
     scrollToBottom();
 }
 
-function getHeatColor(score) {
-    const alpha = Math.max(0.12, Math.min(score, 1) * 0.75);
-    return `rgba(37, 99, 235, ${alpha})`;
+function getContributionWidth(percent) {
+    const value = Number(percent) || 0;
+    if (value <= 0) return 0;
+
+    // 너무 작은 양수도 화면에서는 최소한 보이게 처리
+    return Math.max(value, 4);
 }
 
-function buildHeatStripHtml(wordScores) {
+function getScoreLabel(item) {
+    const percent = Number(item?.percent) || 0;
+
+    if (percent <= 0) {
+        return '낮은 영향';
+    }
+
+    return `${percent.toFixed(1)}%`;
+}
+
+function getSafeNumberText(value) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+        return '-';
+    }
+
+    return number.toFixed(4);
+}
+
+function normalizeDebugItems(items) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+        .filter((item) => item && typeof item === 'object')
+        .slice(0, 5);
+}
+
+function getDebugTitle(item, fallbackIndex) {
+    return (
+        item.policy_name ||
+        item.title ||
+        item.name ||
+        item.document_title ||
+        `문서 ${fallbackIndex + 1}`
+    );
+}
+
+function getDebugPreview(item) {
+    return (
+        item.content_preview ||
+        item.text_preview ||
+        item.preview ||
+        item.text ||
+        item.content ||
+        ''
+    );
+}
+
+function buildInfoToggleHtml(targetId) {
     return `
-        <div class="heat-strip">
-            ${wordScores.map((item) => `
-                <span
-                    class="heat-strip__token"
-                    style="background:${getHeatColor(item.score)}"
-                    title="${item.word} / score=${item.score.toFixed(4)}"
-                >
-                    ${escapeHtml(item.word)}
-                </span>
-            `).join('')}
+        <button
+            type="button"
+            class="xai-info-btn"
+            data-info-target="${targetId}"
+            aria-expanded="false"
+            title="설명 보기"
+        >
+            ?
+        </button>
+    `;
+}
+
+function buildRerankerInfoHtml(id) {
+    return `
+        <div id="${id}" class="xai-info-box" hidden>
+            <strong>Reranker 점수</strong>는 질문과 문서의 관련성을 평가해
+            검색 결과 순서를 다시 정렬한 점수입니다.
+            즉, 답변 생성 전에 어떤 문서를 우선적으로 참고할지 결정하는
+            <strong>검색 단계의 설명</strong>입니다.
         </div>
     `;
 }
 
-function buildBarChartHtml(wordScores) {
-    const sorted = [...wordScores].sort((a, b) => b.score - a.score);
-
+function buildCaptumInfoHtml(id) {
     return `
-        <div class="bar-chart">
-            ${sorted.map((item) => `
-                <div class="bar-row">
-                    <div class="bar-row__label">${escapeHtml(item.word)}</div>
-                    <div class="bar-row__track">
-                        <div class="bar-row__fill" style="width:${Math.max(item.score * 100, 4)}%"></div>
-                    </div>
-                    <div class="bar-row__value">${(item.score * 100).toFixed(1)}%</div>
-                </div>
-            `).join('')}
+        <div id="${id}" class="xai-info-box" hidden>
+            <strong>Captum 기여도</strong>는 최종 답변을 기준으로,
+            각 문서를 제거했을 때 답변 가능도가 얼마나 달라지는지 분석한 값입니다.
+            즉, 생성된 답변이 어떤 문서에 더 많이 의존했는지를 보여주는
+            <strong>답변 단계의 설명</strong>입니다.
         </div>
     `;
 }
 
-function buildHeatmapModalHtml(originalMessage, captumResult) {
-    if (!captumResult || !Array.isArray(captumResult.word_scores) || captumResult.word_scores.length === 0) {
+function buildRetrievalTableHtml(title, items) {
+    const safeItems = normalizeDebugItems(items);
+
+    if (safeItems.length === 0) {
         return `
-            <div class="heatmap-panel">
-                <div class="heatmap-question">${escapeHtml(originalMessage)}</div>
-                <div>분석 결과가 없습니다.</div>
+            <div class="xai-empty">
+                표시할 ${escapeHtml(title)} 결과가 없습니다.
             </div>
         `;
     }
 
-    const wordScores = captumResult.word_scores.filter((item) => item && item.word);
-
     return `
-        <div class="heatmap-panel">
-            <div class="heatmap-question">${escapeHtml(originalMessage)}</div>
-            ${buildHeatStripHtml(wordScores)}
-            ${buildBarChartHtml(wordScores)}
+        <div class="xai-debug-table-wrap">
+            <table class="xai-debug-table">
+                <thead>
+                    <tr>
+                        <th>순위</th>
+                        <th>정책/문서</th>
+                        <th>Qdrant</th>
+                        <th>Reranker</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${safeItems.map((item, index) => {
+                        const titleText = getDebugTitle(item, index);
+                        const preview = getDebugPreview(item);
+                        const qdrantScore = item.qdrant_score ?? item.score ?? item.adjusted_score;
+                        const rerankerScore = item.reranker_score ?? item.rerank_score;
+
+                        return `
+                            <tr>
+                                <td>${escapeHtml(item.rank || index + 1)}</td>
+                                <td>
+                                    <div class="xai-doc-title">${escapeHtml(titleText)}</div>
+                                    ${preview ? `<div class="xai-doc-preview">${escapeHtml(preview)}</div>` : ''}
+                                </td>
+                                <td>${escapeHtml(getSafeNumberText(qdrantScore))}</td>
+                                <td>${escapeHtml(getSafeNumberText(rerankerScore))}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
         </div>
     `;
 }
 
-function openHeatmapModal(originalMessage, captumResult) {
+function buildRetrievalDebugHtml(retrievalDebug) {
+    const beforeItems = retrievalDebug?.before_rerank || [];
+    const afterItems = retrievalDebug?.after_rerank || [];
+
+    return `
+        <section class="xai-section">
+            <div class="xai-section__header">
+                <h4>1. RAG / Reranker 검색 결과</h4>
+                ${buildInfoToggleHtml('reranker-info')}
+            </div>
+            ${buildRerankerInfoHtml('reranker-info')}
+
+            <div class="xai-subsection">
+                <div class="xai-subtitle">Rerank 전 Top 5</div>
+                ${buildRetrievalTableHtml('Rerank 전', beforeItems)}
+            </div>
+
+            <div class="xai-subsection">
+                <div class="xai-subtitle">Rerank 후 Top 5</div>
+                ${buildRetrievalTableHtml('Rerank 후', afterItems)}
+            </div>
+        </section>
+    `;
+}
+
+function buildContributionBarHtml(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return `
+            <div class="xai-empty">
+                Captum 문서 기여도 결과가 없습니다.
+            </div>
+        `;
+    }
+
+    const sorted = [...items].sort((a, b) => {
+        const bPercent = Number(b?.percent) || 0;
+        const aPercent = Number(a?.percent) || 0;
+        return bPercent - aPercent;
+    });
+
+    return `
+        <div class="bar-chart xai-contribution-chart">
+            ${sorted.map((item) => {
+                const label = item.label || '항목';
+                const percent = Number(item.percent) || 0;
+                const width = getContributionWidth(percent);
+                const scoreLabel = getScoreLabel(item);
+
+                return `
+                    <div class="bar-row xai-contribution-row">
+                        <div class="bar-row__label" title="${escapeHtml(label)}">
+                            ${escapeHtml(label)}
+                        </div>
+                        <div class="bar-row__track">
+                            <div class="bar-row__fill" style="width:${width}%"></div>
+                        </div>
+                        <div class="bar-row__value">${escapeHtml(scoreLabel)}</div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
+
+function buildCaptumHtml(xai) {
+    const items = xai?.items || [];
+    const summary = xai?.summary || 'Captum 분석 요약이 없습니다.';
+
+    return `
+        <section class="xai-section">
+            <div class="xai-section__header">
+                <h4>2. Captum 문서 기여도</h4>
+                ${buildInfoToggleHtml('captum-info')}
+            </div>
+            ${buildCaptumInfoHtml('captum-info')}
+
+            <div class="xai-summary">
+                ${escapeHtml(summary)}
+            </div>
+
+            ${buildContributionBarHtml(items)}
+        </section>
+    `;
+}
+
+function buildHeatmapModalHtml(originalMessage, analysisData) {
+    const retrievalDebug = analysisData?.retrieval_debug || {};
+    const xai = analysisData?.xai || null;
+
+    return `
+        <div class="heatmap-panel xai-panel">
+            <section class="xai-section">
+                <h4>사용자 질문</h4>
+                <div class="heatmap-question">${escapeHtml(originalMessage)}</div>
+            </section>
+
+            ${buildRetrievalDebugHtml(retrievalDebug)}
+            ${buildCaptumHtml(xai)}
+            
+        </div>
+    `;
+}
+
+function bindXaiInfoButtons() {
+    const buttons = heatmapContent.querySelectorAll('.xai-info-btn');
+
+    buttons.forEach((button) => {
+        button.addEventListener('click', () => {
+            const targetId = button.dataset.infoTarget;
+            if (!targetId) return;
+
+            const target = heatmapContent.querySelector(`#${CSS.escape(targetId)}`);
+            if (!target) return;
+
+            const willOpen = target.hidden;
+            target.hidden = !willOpen;
+            button.setAttribute('aria-expanded', String(willOpen));
+        });
+    });
+}
+
+function openHeatmapModal(originalMessage, analysisData) {
     closeDeleteModal();
-    heatmapContent.innerHTML = buildHeatmapModalHtml(originalMessage, captumResult);
+    heatmapContent.innerHTML = buildHeatmapModalHtml(originalMessage, analysisData);
+    bindXaiInfoButtons();
     heatmapModal.hidden = false;
     document.body.classList.add('sidebar-open');
 }
@@ -841,6 +1043,40 @@ function closeHeatmapModal() {
     heatmapModal.hidden = true;
     heatmapContent.innerHTML = '';
     unlockOverlayScrollIfNeeded();
+}
+
+function buildHeatmapButton(originalMessage, analysisData) {
+    const hasRetrievalDebug = Boolean(
+        analysisData?.retrieval_debug &&
+        (
+            Array.isArray(analysisData.retrieval_debug.before_rerank) ||
+            Array.isArray(analysisData.retrieval_debug.after_rerank)
+        )
+    );
+
+    const hasXaiItems = Array.isArray(analysisData?.xai?.items) &&
+        analysisData.xai.items.length > 0;
+
+    if (!hasRetrievalDebug && !hasXaiItems) {
+        return null;
+    }
+
+    const wrap = document.createElement('div');
+    wrap.className = 'xai-action-row';
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'heatmap-open-btn';
+    button.innerHTML = '<i class="fa-solid fa-chart-simple"></i><span>답변 근거 분석 보기</span>';
+
+    // 버튼 클릭 시 서버에 새로 요청하지 않는다.
+    // 이미 /chat 응답에 포함되어 있던 retrieval_debug와 xai를 모달에 표시만 한다.
+    button.addEventListener('click', () => {
+        openHeatmapModal(originalMessage, analysisData);
+    });
+
+    wrap.appendChild(button);
+    return wrap;
 }
 
 heatmapClose?.addEventListener('click', closeHeatmapModal);
@@ -866,28 +1102,9 @@ deleteConfirm?.addEventListener('click', async () => {
     }
 });
 
-function buildHeatmapButton(originalMessage, captumResult) {
-    if (!captumResult || !Array.isArray(captumResult.word_scores) || captumResult.word_scores.length === 0) {
-        return null;
-    }
 
-    const wrap = document.createElement('div');
-    wrap.className = 'xai-action-row';
 
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'heatmap-open-btn';
-    button.innerHTML = '<i class="fa-solid fa-fire"></i><span>입력값 중요도 그래프 (히트맵) 보기</span>';
-
-    button.addEventListener('click', () => {
-        openHeatmapModal(originalMessage, captumResult);
-    });
-
-    wrap.appendChild(button);
-    return wrap;
-}
-
-function updateMessage(id, text, originalMessage = '', captumData = null) {
+function updateMessage(id, text, originalMessage = '', analysisData = null) {
     const row = document.getElementById(id);
     if (!row) return;
 
@@ -905,7 +1122,7 @@ function updateMessage(id, text, originalMessage = '', captumData = null) {
     const stack = document.createElement('div');
     stack.className = 'analysis-stack';
 
-    const heatmapButton = buildHeatmapButton(originalMessage, captumData);
+    const heatmapButton = buildHeatmapButton(originalMessage, analysisData);
     if (heatmapButton) {
         stack.appendChild(heatmapButton);
     }
@@ -924,41 +1141,35 @@ async function sendMessage(message, userMessageId) {
     const loadingId = appendMessage('bot', '', true);
 
     try {
-        const [chatResult, captumResult] = await Promise.allSettled([
-            callChatAPI(message),
-            callCaptumAPI(message)
-        ]);
+        const chatData = await callChatAPI(message);
+        const answer = chatData.answer || '응답을 생성하지 못했습니다.';
+        const xaiData = chatData.xai || null;
+        const retrievalDebug = chatData.retrieval_debug || null;
 
-        if (chatResult.status !== 'fulfilled') {
-            throw chatResult.reason;
-        }
+        // 개발자 확인용 로그
+        // F12 Console에서 원본 Reranker/Captum 값을 확인할 수 있다.
+        console.group('XAI 통합 응답');
+        console.log('전체 응답:', chatData);
+        console.log('RAG / Reranker 결과:', retrievalDebug);
+        console.log('Captum 정규화 결과:', xaiData?.items || []);
+        console.log('Captum 원본값:', xaiData?.raw || {});
+        console.groupEnd();
 
-        const chatData = chatResult.value;
-        const captumData = captumResult.status === 'fulfilled' ? captumResult.value : null;
-
-        if (captumData) {
-            console.log('=== Captum 단어별 기여도 ===');
-            (captumData.word_scores || []).forEach((item, idx) => {
-                console.log(
-                    `${idx + 1}. ${item.word} | score=${item.score} | span=(${item.start}, ${item.end})`
-                );
-            });
-
-            updateUserMessageWithCaptum(userMessageId, message, captumData);
-        }
+        // 현재 Captum은 문서 단위 분석이므로 질문 토큰 색칠은 시연 버전에서 비활성화.
+        // 기존 함수/CSS는 삭제하지 않고 보존한다.
+        // updateUserMessageWithCaptum(userMessageId, message, xaiData);
 
         updateMessage(
             loadingId,
-            chatData.answer || '응답을 생성하지 못했습니다.',
+            answer,
             message,
-            captumData
+            {
+                xai: xaiData,
+                retrieval_debug: retrievalDebug
+            }
         );
 
         await refreshConversationList();
-
-        if (captumResult.status === 'rejected') {
-            console.warn('Captum 분석 실패:', captumResult.reason);
-        }
     } catch (error) {
         updateMessage(
             loadingId,
