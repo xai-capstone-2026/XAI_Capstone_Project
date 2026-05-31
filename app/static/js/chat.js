@@ -11,7 +11,7 @@ const sidebarClose = document.getElementById('sidebar-close');
 const sidebarBackdrop = document.getElementById('sidebar-backdrop');
 
 const currentChatTitle = document.getElementById('current-chat-title');
-const DEFAULT_TOPBAR_TITLE = '청년 정책 XAI 상담 채팅';
+const DEFAULT_TOPBAR_TITLE = '복지정책 XAI 상담 채팅';
 
 const conversationPanel = document.querySelector('.conversation-panel');
 const conversationToggleBtn = document.getElementById('conversation-toggle-btn');
@@ -698,9 +698,9 @@ async function loadCurrentConversation() {
  * Captum / heatmap rendering
  * ----------------------------- */
 function getWordHighlightColor(score, rank) {
-    if (rank === 0) return 'rgba(255,230,120,0.6)';
-    if (rank <= 2) return 'rgba(255,255,255,0.30)';
-    if (score >= 0.35) return 'rgba(255,255,255,0.20)';
+    if (rank === 0) return 'rgba(255, 230, 120, 0.72)';  // 1등: 노란색
+    if (rank === 1) return 'rgba(255, 255, 255, 0.34)';  // 2등: 흰색 계열
+    if (rank === 2) return 'rgba(219, 234, 254, 0.42)';  // 3등: 연한 파란색
     return 'transparent';
 }
 
@@ -754,9 +754,52 @@ function buildUserHighlightedHtml(originalMessage, captumResult) {
     }
 
     html += '</div>';
-    html += '<div class="user-highlight-note">Captum 기준으로 입력 질문에서 상대적으로 중요한 단어를 색으로 표시했습니다.</div>';
+    html += '<div class="user-highlight-note">Captum 기준 상위 핵심어만 색으로 표시했습니다.</div>';
 
     return html;
+}
+
+function buildWordScoresFromQueryItems(originalMessage, queryItems, topN = 3) {
+    if (!originalMessage || !Array.isArray(queryItems)) {
+        return [];
+    }
+
+    const sorted = [...queryItems]
+        .filter((item) => item?.label && Number(item.percent) > 0)
+        .sort((a, b) => Number(b.percent) - Number(a.percent))
+        .slice(0, topN);
+
+    const usedRanges = [];
+
+    return sorted
+        .map((item) => {
+            const word = String(item.label || '').trim();
+            if (!word) return null;
+
+            let start = originalMessage.indexOf(word);
+
+            // 같은 단어가 여러 번 나오거나, 이미 칠한 범위와 겹치는 경우 다음 위치를 찾는다.
+            while (
+                start >= 0 &&
+                usedRanges.some((range) => start < range.end && start + word.length > range.start)
+            ) {
+                start = originalMessage.indexOf(word, start + word.length);
+            }
+
+            // 원문에서 단어를 찾지 못하면 색칠 대상에서 제외한다.
+            if (start < 0) return null;
+
+            const end = start + word.length;
+            usedRanges.push({ start, end });
+
+            return {
+                start,
+                end,
+                score: Number(item.percent) || 0,
+                label: word,
+            };
+        })
+        .filter(Boolean);
 }
 
 function updateUserMessageWithCaptum(id, originalMessage, captumResult) {
@@ -863,6 +906,16 @@ function buildCaptumInfoHtml(id) {
     `;
 }
 
+function buildQueryCaptumInfoHtml(id) {
+    return `
+        <div id="${id}" class="xai-info-box" hidden>
+            <strong>질문 핵심어 기여도</strong>는 사용자 질문에서 조사·어미 등
+            의미 기여가 낮은 요소를 제외하고, 핵심 단어를 기준으로
+            답변 생성에 미친 영향을 보여주는 값입니다.
+        </div>
+    `;
+}
+
 function buildRetrievalTableHtml(title, items) {
     const safeItems = normalizeDebugItems(items);
 
@@ -939,7 +992,7 @@ function buildContributionBarHtml(items) {
     if (!Array.isArray(items) || items.length === 0) {
         return `
             <div class="xai-empty">
-                Captum 문서 기여도 결과가 없습니다.
+                Captum 결과가 없습니다.
             </div>
         `;
     }
@@ -995,6 +1048,31 @@ function buildCaptumHtml(xai) {
     `;
 }
 
+function buildQueryCaptumHtml(xai) {
+    const queryItems = xai?.query_items || [];
+    const summary = xai?.query_summary || '질문 핵심어 분석 요약이 없습니다.';
+
+    if (!Array.isArray(queryItems) || queryItems.length === 0) {
+        return '';
+    }
+
+    return `
+        <section class="xai-section">
+            <div class="xai-section__header">
+                <h4>3. Captum 질문 핵심어 기여도</h4>
+                ${buildInfoToggleHtml('query-captum-info')}
+            </div>
+            ${buildQueryCaptumInfoHtml('query-captum-info')}
+
+            <div class="xai-summary">
+                ${escapeHtml(summary)}
+            </div>
+
+            ${buildContributionBarHtml(queryItems)}
+        </section>
+    `;
+}
+
 function buildHeatmapModalHtml(originalMessage, analysisData) {
     const retrievalDebug = analysisData?.retrieval_debug || {};
     const xai = analysisData?.xai || null;
@@ -1008,6 +1086,7 @@ function buildHeatmapModalHtml(originalMessage, analysisData) {
 
             ${buildRetrievalDebugHtml(retrievalDebug)}
             ${buildCaptumHtml(xai)}
+            ${buildQueryCaptumHtml(xai)}
             
         </div>
     `;
@@ -1055,9 +1134,12 @@ function buildHeatmapButton(originalMessage, analysisData) {
     );
 
     const hasXaiItems = Array.isArray(analysisData?.xai?.items) &&
-        analysisData.xai.items.length > 0;
+    analysisData.xai.items.length > 0;
 
-    if (!hasRetrievalDebug && !hasXaiItems) {
+    const hasQueryItems = Array.isArray(analysisData?.xai?.query_items) &&
+        analysisData.xai.query_items.length > 0;
+
+    if (!hasRetrievalDebug && !hasXaiItems && !hasQueryItems) {
         return null;
     }
 
@@ -1151,13 +1233,25 @@ async function sendMessage(message, userMessageId) {
         console.group('XAI 통합 응답');
         console.log('전체 응답:', chatData);
         console.log('RAG / Reranker 결과:', retrievalDebug);
-        console.log('Captum 정규화 결과:', xaiData?.items || []);
+        console.log('Captum 문서 기여도:', xaiData?.items || []);
+        console.log('Captum 질문 핵심어 기여도:', xaiData?.query_items || []);
         console.log('Captum 원본값:', xaiData?.raw || {});
         console.groupEnd();
 
-        // 현재 Captum은 문서 단위 분석이므로 질문 토큰 색칠은 시연 버전에서 비활성화.
-        // 기존 함수/CSS는 삭제하지 않고 보존한다.
-        // updateUserMessageWithCaptum(userMessageId, message, xaiData);
+        // 질문 토큰 색칠
+        const queryWordScores = buildWordScoresFromQueryItems(
+            message,
+            xaiData?.query_items || [],
+            3
+        );
+
+        if (queryWordScores.length > 0) {
+            updateUserMessageWithCaptum(
+                userMessageId,
+                message,
+                { word_scores: queryWordScores }
+            );
+        }
 
         updateMessage(
             loadingId,
@@ -1266,13 +1360,13 @@ exampleChips.forEach((chip) => {
                 template = `월세 지원 정책에 대해 알려줘.\n지역:\n나이:\n소득수준:`;
                 break;
             case '취업 지원':
-                template = `취업 지원 프로그램에 대해 알려줘.\n관심 직무:\n지역:\n현재 상태(학생/준비생):\n희망 기업 규모:`;
+                template = `취업 지원 프로그램에 대해 알려줘.\n관심 직무:\n지역:\n나이:\n희망 기업 규모:`;
                 break;
             case '창업 지원':
-                template = `청년 창업 지원금에 대해 궁금해.\n나이:\n희망 창업 분야:\n사업자 등록 여부:`;
+                template = `창업 지원금에 대해 궁금해.\n나이:\n희망 창업 분야:\n사업자 등록 여부:`;
                 break;
             case '자산 형성':
-                template = `청년을 위한 자산 형성 지원 정책이 궁금해.\n현재 직업(재직/준비생):\n월 평균 소득:\n거주 지역:\n중위소득 비율:`;
+                template = `자산 형성 지원 정책이 궁금해.\n현재 직업:\n월 평균 소득:\n거주 지역:\n중위소득 비율:`;
                 break;
             default:
                 template = `${chipText} 관련 정책 알려줘.`;

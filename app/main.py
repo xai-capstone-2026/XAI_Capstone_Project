@@ -51,11 +51,17 @@ def _make_xai_error(message: str) -> dict:
         "type": "document_ablation",
         "status": "error",
         "items": [],
+        "query_items": [],
         "raw": {
             "words": [],
             "attributions": [],
+            "query_words": [],
+            "query_attributions": [],
+            "answer": None,
+            "message": message,
         },
         "summary": message,
+        "query_summary": "질문 핵심어 분석 결과가 없습니다.",
     }
 
 
@@ -68,6 +74,8 @@ def _normalize_captum_result(captum_raw: dict | None) -> dict:
     {
         "words": ["문서 1: ...", "문서 2: ...", "사용자 질문"],
         "attributions": [12.3, 4.7, 1.2],
+        "query_words": ["서울", "25", "취업준비생", "면접정장"],
+        "query_attributions": [28.6, 18.3, 34.7, 8.2],
         "answer": "..."
     }
 
@@ -84,18 +92,30 @@ def _normalize_captum_result(captum_raw: dict | None) -> dict:
                 "percent": 67.6
             }
         ],
+        "query_items": [
+            {
+                "label": "서울",
+                "kind": "query_word",
+                "raw_score": 28.6,
+                "positive_score": 28.6,
+                "percent": 28.6
+            }
+        ],
         "raw": {
             "words": [...],
-            "attributions": [...]
+            "attributions": [...],
+            "query_words": [...],
+            "query_attributions": [...]
         },
-        "summary": "..."
+        "summary": "...",
+        "query_summary": "..."
     }
 
     정규화 기준:
     - Captum 원본 attribution 값은 raw에 그대로 보존한다.
     - 사용자 화면에는 양수 기여도만 합산해 100% 기준으로 보여준다.
-    - 음수 attribution은 '답변 기여도가 낮거나 방해된 항목'으로 볼 수 있어
-      사용자 표시용 percent 계산에서는 0으로 처리한다.
+    - query_words/query_attributions는 질문 핵심어별 영향도 표시와
+      사용자 질문 말풍선 상위 단어 하이라이트에 사용한다.
     """
     if not isinstance(captum_raw, dict):
         return _make_xai_error("Captum 분석 결과 형식이 올바르지 않습니다.")
@@ -103,13 +123,23 @@ def _normalize_captum_result(captum_raw: dict | None) -> dict:
     words = captum_raw.get("words") or []
     attributions = captum_raw.get("attributions") or []
 
+    # 새 노트북에서 추가된 질문 핵심어별 Captum 결과
+    query_words = captum_raw.get("query_words") or []
+    query_attributions = captum_raw.get("query_attributions") or []
+
     if not isinstance(words, list) or not isinstance(attributions, list):
         return _make_xai_error("Captum 분석 결과에 words/attributions 배열이 없습니다.")
 
-    # words와 attributions 길이가 혹시 다를 경우를 대비해
-    # 둘 중 더 짧은 길이에 맞춰 안전하게 처리한다.
-    pair_count = min(len(words), len(attributions))
+    # 질문 핵심어별 결과는 새 기능이므로 형식이 이상해도 전체 XAI를 실패시키지 않고 비운다.
+    if not isinstance(query_words, list):
+        query_words = []
 
+    if not isinstance(query_attributions, list):
+        query_attributions = []
+
+
+    # 1) 문서/사용자 질문 단위 Captum 결과 정규화
+    pair_count = min(len(words), len(attributions))
     items = []
 
     for idx in range(pair_count):
@@ -132,14 +162,40 @@ def _normalize_captum_result(captum_raw: dict | None) -> dict:
             "percent": 0.0,
         })
 
-    # 양수 기여도 합계를 기준으로 100% 정규화한다.
     total_positive = sum(item["positive_score"] for item in items)
 
     if total_positive > 0:
         for item in items:
             item["percent"] = round((item["positive_score"] / total_positive) * 100, 1)
 
-    # 팝업 상단에 보여줄 간단 요약문 생성
+
+    # 2) 질문 핵심어별 Captum 결과 정규화
+    query_pair_count = min(len(query_words), len(query_attributions))
+    query_items = []
+
+    for idx in range(query_pair_count):
+        label = str(query_words[idx] or f"질문 단어 {idx + 1}")
+        raw_score = _safe_float(query_attributions[idx])
+
+        # 기존 items 처리 방식과 맞춰, 화면 표시용 percent 계산에는 양수만 사용한다.
+        positive_score = max(raw_score, 0.0)
+
+        query_items.append({
+            "label": label,
+            "kind": "query_word",
+            "raw_score": raw_score,
+            "positive_score": positive_score,
+            "percent": 0.0,
+        })
+
+    total_query_positive = sum(item["positive_score"] for item in query_items)
+
+    if total_query_positive > 0:
+        for item in query_items:
+            item["percent"] = round((item["positive_score"] / total_query_positive) * 100, 1)
+
+
+    # 3) 요약문 생성
     if items:
         top_item = max(items, key=lambda item: item["positive_score"])
 
@@ -150,20 +206,36 @@ def _normalize_captum_result(captum_raw: dict | None) -> dict:
     else:
         summary = captum_raw.get("message") or "Captum 분석 결과가 비어 있습니다."
 
+    if query_items:
+        top_query_item = max(query_items, key=lambda item: item["positive_score"])
+
+        if top_query_item["positive_score"] > 0:
+            query_summary = (
+                f"질문 핵심어 중에서는 '{top_query_item['label']}' 항목의 영향도가 가장 크게 나타났습니다."
+            )
+        else:
+            query_summary = "뚜렷하게 양수 영향도를 보인 질문 핵심어가 없습니다."
+    else:
+        query_summary = "질문 핵심어 분석 결과가 없습니다."
+
     return {
         "type": "document_ablation",
-        "status": "ok" if items else "empty",
+        "status": "ok" if items or query_items else "empty",
         "items": items,
+        "query_items": query_items,
 
         # raw는 사용자 화면용이 아니라 개발자 확인용.
         # 프론트에서 console.log로 찍어 F12에서 확인할 수 있게 둔다.
         "raw": {
             "words": words,
             "attributions": attributions,
+            "query_words": query_words,
+            "query_attributions": query_attributions,
             "answer": captum_raw.get("answer"),
             "message": captum_raw.get("message"),
         },
         "summary": summary,
+        "query_summary": query_summary,
     }
 
 
