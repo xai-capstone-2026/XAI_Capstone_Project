@@ -654,6 +654,27 @@ function appendStoredMessage(role, text) {
         content.className = 'markdown-body';
         content.innerHTML = renderMarkdown(text || '');
         bubble.appendChild(content);
+
+        const analysisData = metadata
+            ? {
+                retrieval_debug: metadata.retrieval_debug || null,
+                xai: metadata.xai || null,
+            }
+            : null;
+
+        const originalMessage = metadata?.original_message || '';
+
+        const stack = document.createElement('div');
+        stack.className = 'analysis-stack';
+
+        const heatmapButton = buildHeatmapButton(originalMessage, analysisData);
+        if (heatmapButton) {
+            stack.appendChild(heatmapButton);
+        }
+
+        if (stack.children.length > 0) {
+            bubble.appendChild(stack);
+        }
     } else {
         bubble.textContent = text || '';
     }
@@ -688,7 +709,7 @@ async function loadCurrentConversation() {
 
     messagesData.forEach((msg) => {
         const sender = msg.role === 'assistant' ? 'assistant' : 'user';
-        appendStoredMessage(sender, msg.content || '');
+        appendStoredMessage(sender, msg.content || '', msg.metadata || null);
     });
 
     scrollToBottom();

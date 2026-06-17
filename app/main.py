@@ -463,9 +463,6 @@ async def chat(request: ChatRequest):
             # ============================================================
             # 3) 대화 저장
             # ============================================================
-            # 저장소에는 기존처럼 사용자 메시지와 assistant 답변만 저장한다.
-            # retrieval_debug와 xai는 매번 계산되는 부가 분석 결과이므로
-            # 대화 본문에는 저장하지 않고 현재 응답에만 포함한다.
             store.append_message(
                 request.conversation_id,
                 request.user_id,
@@ -479,11 +476,26 @@ async def chat(request: ChatRequest):
                 request.message,
             )
 
+            # XAI 복원에 필요한 부가정보를 metadata로 함께 저장한다.
+            assistant_metadata = {
+                "original_message": request.message,
+                "retrieval_debug": retrieval_debug,
+                "xai": {
+                    "type": xai.get("type"),
+                    "status": xai.get("status"),
+                    "items": xai.get("items", []),
+                    "query_items": xai.get("query_items", []),
+                    "summary": xai.get("summary"),
+                    "query_summary": xai.get("query_summary"),
+                },
+            }
+
             store.append_message(
                 request.conversation_id,
                 request.user_id,
                 "assistant",
                 answer,
+                metadata=assistant_metadata,
             )
 
             # ============================================================

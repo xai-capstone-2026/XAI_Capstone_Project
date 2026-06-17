@@ -97,11 +97,14 @@ class ConversationStore:
         user_id: str,
         role: str,
         content: str,
+        metadata: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         if role not in {"user", "assistant"}:
             raise ValueError("role은 'user' 또는 'assistant'여야 합니다.")
         if not content or not content.strip():
             raise ValueError("content가 비어 있습니다.")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("metadata는 dict 형식이어야 합니다.")
 
         conversation_data = self.get_conversation(conversation_id, user_id)
         now = self._now_iso()
@@ -111,6 +114,9 @@ class ConversationStore:
             "content": content,
             "created_at": now,
         }
+
+        if metadata is not None:
+            message["metadata"] = metadata
 
         messages = conversation_data.setdefault("messages", [])
         if not isinstance(messages, list):
