@@ -639,7 +639,7 @@ function clearChatMessages() {
     messages.innerHTML = '';
 }
 
-function appendStoredMessage(role, text) {
+function appendStoredMessage(role, text, metadata = null) {
     const id = appendMessage(role, '', false);
     const row = document.getElementById(id);
     if (!row) return;
