@@ -110,6 +110,7 @@ class ConversationStore:
         now = self._now_iso()
 
         message = {
+            "message_id": f"msg_{uuid4().hex}",
             "role": role,
             "content": content,
             "created_at": now,
@@ -139,30 +140,29 @@ class ConversationStore:
 
         return conversation_data
 
-    def build_llama_history(self, conversation_id: str, user_id: str) -> List[Dict[str, str]]:
-        conversation_data = self.get_conversation(conversation_id, user_id)
-
-        history: List[Dict[str, str]] = []
-        messages = conversation_data.get("messages", [])
-
-        if not isinstance(messages, list):
-            raise ValueError("messages 형식이 올바르지 않습니다.")
-
-        for msg in messages:
-            role = msg.get("role")
-            content = msg.get("content")
-
-            if role not in {"user", "assistant"}:
-                continue
-            if not isinstance(content, str):
-                continue
-
-            history.append({
-                "role": role,
-                "content": content,
-            })
-
-        return history
+    def update_message_metadata(
+            self,
+            conversation_id: str,
+            user_id: str,
+            message_id: str,
+            metadata: Dict[str, Any],
+        ) -> Dict[str, Any]:
+            if not message_id:
+                raise ValueError("message_id가 필요합니다.")
+            if not isinstance(metadata, dict):
+                raise ValueError("metadata는 dict 형식이어야 합니다.")
+    
+            conversation_data = self.get_conversation(conversation_id, user_id)
+            messages = conversation_data.get("messages", [])
+    
+            for message in messages:
+                if message.get("message_id") == message_id:
+                    message["metadata"] = metadata
+                    conversation_data["updated_at"] = self._now_iso()
+                    self.save_conversation(conversation_data)
+                    return conversation_data
+    
+            raise FileNotFoundError("수정할 메시지를 찾을 수 없습니다.")
 
     def update_conversation_title(
         self,

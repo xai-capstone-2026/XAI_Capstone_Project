@@ -243,6 +243,7 @@ class ChatRequest(BaseModel):
     user_id: str
     conversation_id: str
     message: str
+    assistant_message_id: str | None = None
 
 class CreateConversationRequest(BaseModel):
     user_id: str
@@ -257,6 +258,8 @@ class UpdateConversationTitleRequest(BaseModel):
 async def home(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
 def _raise_store_http_error(e: Exception) -> None:
+    if isinstance(e, HTTPException):
+        raise e
     if isinstance(e, ValueError):
         raise HTTPException(status_code=400, detail=str(e))
     if isinstance(e, PermissionError):
@@ -320,56 +323,6 @@ async def conversations_delete(conversation_id: str, user_id: str):
     except Exception as e:
         _raise_store_http_error(e)
 
-# @app.post("/chat")
-# async def chat(request: ChatRequest):
-#     lock_key = request.conversation_id
-
-#     async with session_locks[lock_key]:
-#         try:
-#             history = store.build_llama_history(
-#                 request.conversation_id,
-#                 request.user_id,
-#             )
-
-#             # Colab과 통신
-#             async with httpx.AsyncClient(verify=False) as client:
-#                 colab_api_url = "https://api.kr-welfare-xai.com/ask"
-#                 # 코랩 API 규격인 {"query": "..."} 에 맞게 보냅니다.
-#                 api_response = await client.post(
-#                     colab_api_url, 
-#                     json={"query": request.message},
-#                     timeout=60.0  # 답변 대기 시간 넉넉히 60초
-#                 )
-                
-#                 if api_response.status_code == 200:
-#                     answer = api_response.json().get("answer", "답변을 추출하지 못했습니다.")
-#                 else:
-#                     answer = f"코랩 서버 응답 에러: {api_response.status_code}"
-
-#             store.append_message(
-#                 request.conversation_id,
-#                 request.user_id,
-#                 "user",
-#                 request.message,
-#             )
-
-#             store.maybe_update_title_from_first_user_message(
-#                 request.conversation_id,
-#                 request.user_id,
-#                 request.message,
-#             )
-
-#             store.append_message(
-#                 request.conversation_id,
-#                 request.user_id,
-#                 "assistant",
-#                 answer,
-#             )
-
-#             return {"answer": answer}
-#         except Exception as e:
-#             _raise_store_http_error(e)
-
 @app.post("/chat")
 async def chat(request: ChatRequest):
     lock_key = request.conversation_id
@@ -384,12 +337,16 @@ async def chat(request: ChatRequest):
                 request.user_id,
             )
 
-            # 기본값 설정
-            # /ask 또는 /analyze가 실패해도 응답 JSON 구조가 깨지지 않도록
-            # answer, retrieval_debug, xai의 기본 구조를 먼저 만들어둔다.
             answer = "답변을 생성하지 못했습니다."
             retrieval_debug = _empty_retrieval_debug()
-            xai = _make_xai_error("XAI 분석이 수행되지 않았습니다.")
+            xai = {
+                "type": "document_ablation",
+                "status": "pending",
+                "items": [],
+                "query_items": [],
+                "summary": "답변 근거를 분석하고 있습니다.",
+                "query_summary": "질문 핵심어를 분석하고 있습니다.",
+            }
 
             async with httpx.AsyncClient(verify=False) as client:
                 # ============================================================
@@ -418,38 +375,8 @@ async def chat(request: ChatRequest):
                         or _empty_retrieval_debug()
                     )
 
-                    # ========================================================
-                    # 2) Colab /analyze 호출
-                    # ========================================================
-                    # - 방금 /ask에서 생성된 답변과 context를 기준으로
-                    #   Captum Feature Ablation 분석 수행
-                    try:
-                        analyze_response = await client.post(
-                            COLAB_ANALYZE_URL,
-                            json={"query": request.message},
-                            # Captum은 LLM forward를 여러 번 수행하므로 /ask보다 오래 걸릴 수 있다.
-                            timeout=180.0,
-                        )
-
-                        if analyze_response.status_code == 200:
-                            captum_raw = analyze_response.json()
-
-                            # Colab 원본 Captum 결과(words, attributions)를
-                            # 프론트 표시용 xai.items(percent 포함) 구조로 변환한다.
-                            xai = _normalize_captum_result(captum_raw)
-                        else:
-                            # /ask는 성공했지만 /analyze만 실패한 경우
-                            # 답변은 정상 표시하고, xai만 error 상태로 내려보낸다.
-                            xai = _make_xai_error(
-                                f"Colab /analyze 응답 에러: {analyze_response.status_code}"
-                            )
-
-                    except Exception as analyze_error:
-                        # Captum 분석 중 timeout, 연결 오류 등이 나도
-                        # 전체 답변 표시를 막지 않기 위해 xai만 error 처리한다.
-                        xai = _make_xai_error(
-                            f"Captum 분석 중 오류가 발생했습니다: {str(analyze_error)}"
-                        )
+                    if ask_data.get("error") is True:
+                        raise HTTPException(status_code=502, detail=answer)
 
                 else:
                     # /ask 자체가 실패한 경우
@@ -490,7 +417,7 @@ async def chat(request: ChatRequest):
                 },
             }
 
-            store.append_message(
+            saved_conversation = store.append_message(
                 request.conversation_id,
                 request.user_id,
                 "assistant",
@@ -498,19 +425,19 @@ async def chat(request: ChatRequest):
                 metadata=assistant_metadata,
             )
 
-            # ============================================================
-            # 4) 프론트로 통합 응답 반환
-            # ============================================================
-            # chat.js는 앞으로 /captum을 따로 호출하지 않고,
-            # 이 응답 안의 xai와 retrieval_debug를 사용해 팝업을 구성한다.
+            assistant_message_id = saved_conversation["messages"][-1]["message_id"]
+
             return {
                 "answer": answer,
                 "retrieval_debug": retrieval_debug,
                 "xai": xai,
+                "conversation_id": request.conversation_id,
+                "assistant_message_id": assistant_message_id,
             }
 
         except Exception as e:
             _raise_store_http_error(e)
+
 
 
 @app.post("/captum")
@@ -521,26 +448,67 @@ async def captum(request: ChatRequest):
         try:
             store.get_conversation(request.conversation_id, request.user_id)
 
-            # Colab의 XAI 전용 API(/analyze)로 분석 요청 토스
-            async with httpx.AsyncClient(verify=False) as client:
-                colab_captum_url = "https://api.kr-welfare-xai.com/analyze"
-                
-                api_response = await client.post(
-                    colab_captum_url, 
-                    json={"query": request.message},
-                    timeout=120.0
+            try:
+                async with httpx.AsyncClient(verify=False) as client:
+                    api_response = await client.post(
+                        COLAB_ANALYZE_URL,
+                        json={"query": request.message},
+                        timeout=120.0,
+                    )
+
+                    if api_response.status_code == 200:
+                        xai = _normalize_captum_result(api_response.json())
+                    else:
+                        xai = _make_xai_error(
+                            f"Colab /analyze 응답 에러: {api_response.status_code}"
+                        )
+
+            except httpx.TimeoutException:
+                xai = _make_xai_error(
+                    "답변 근거 분석을 불러오지 못했습니다."
                 )
-                
-                if api_response.status_code == 200:
-                    result = api_response.json()
-                    return result
-                else:
-                    return {"words": ["서버", "응답", "에러"], "attributions": [0.0, 0.0, 0.0]}
+
+            except httpx.RequestError:
+                xai = _make_xai_error(
+                    "답변 근거 분석 서버에 연결하지 못했습니다."
+                )
+
+            if request.assistant_message_id:
+                conversation = store.get_conversation(
+                    request.conversation_id,
+                    request.user_id,
+                )
+                target = next(
+                    (
+                        message for message in conversation.get("messages", [])
+                        if message.get("message_id") == request.assistant_message_id
+                    ),
+                    None,
+                )
+                if target is None:
+                    raise HTTPException(status_code=404, detail="답변 메시지를 찾을 수 없습니다.")
+
+                metadata = dict(target.get("metadata") or {})
+                metadata["xai"] = {
+                    "type": xai.get("type"),
+                    "status": xai.get("status"),
+                    "items": xai.get("items", []),
+                    "query_items": xai.get("query_items", []),
+                    "summary": xai.get("summary"),
+                    "query_summary": xai.get("query_summary"),
+                }
+                store.update_message_metadata(
+                    request.conversation_id,
+                    request.user_id,
+                    request.assistant_message_id,
+                    metadata,
+                )
+
+            return {"xai": xai}
 
         except Exception as e:
             _raise_store_http_error(e)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) # 🔄️ port 9000 => 8000
-
 

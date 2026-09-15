@@ -335,9 +335,7 @@ async function callChatAPI(message) {
     );
 }
 
-async function callCaptumAPI(message) {
-    const conversationId = await ensureConversationReady();
-
+async function callCaptumAPI(message, conversationId, assistantMessageId = null) {
     return fetchJson(
         '/captum',
         {
@@ -346,7 +344,8 @@ async function callCaptumAPI(message) {
             body: JSON.stringify({
                 user_id: userId,
                 conversation_id: conversationId,
-                message
+                message,
+                assistant_message_id: assistantMessageId
             })
         },
         'Captum 응답 오류'
@@ -1146,6 +1145,39 @@ function closeHeatmapModal() {
 }
 
 function buildHeatmapButton(originalMessage, analysisData) {
+    if (analysisData?.xai?.status === 'pending') {
+        const wrap = document.createElement('div');
+        wrap.className = 'xai-action-row';
+
+        const status = document.createElement('div');
+        status.className = 'xai-loading-status';
+        status.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>답변 근거 분석 중…</span>';
+
+        wrap.appendChild(status);
+        return wrap;
+    }
+
+    if (analysisData?.xai?.status === 'error') {
+        const wrap = document.createElement('div');
+        wrap.className = 'xai-action-row';
+
+        const status = document.createElement('div');
+        status.className = 'xai-error-status';
+
+        const icon = document.createElement('i');
+        icon.className = 'fa-solid fa-triangle-exclamation';
+
+        const text = document.createElement('span');
+        text.textContent = analysisData.xai.summary
+            || '답변 근거 분석을 불러오지 못했습니다.';
+
+        status.appendChild(icon);
+        status.appendChild(text);
+        wrap.appendChild(status);
+
+        return wrap;
+    }
+
     const hasRetrievalDebug = Boolean(
         analysisData?.retrieval_debug &&
         (
@@ -1248,31 +1280,15 @@ async function sendMessage(message, userMessageId) {
         const answer = chatData.answer || '응답을 생성하지 못했습니다.';
         const xaiData = chatData.xai || null;
         const retrievalDebug = chatData.retrieval_debug || null;
+        const conversationId = chatData.conversation_id || currentConversationId;
+        const assistantMessageId = chatData.assistant_message_id || null;
 
         // 개발자 확인용 로그
         // F12 Console에서 원본 Reranker/Captum 값을 확인할 수 있다.
-        console.group('XAI 통합 응답');
-        console.log('전체 응답:', chatData);
+        console.group('답변 우선 응답');
+        console.log('응답:', chatData);
         console.log('RAG / Reranker 결과:', retrievalDebug);
-        console.log('Captum 문서 기여도:', xaiData?.items || []);
-        console.log('Captum 질문 핵심어 기여도:', xaiData?.query_items || []);
-        console.log('Captum 원본값:', xaiData?.raw || {});
         console.groupEnd();
-
-        // 질문 토큰 색칠
-        const queryWordScores = buildWordScoresFromQueryItems(
-            message,
-            xaiData?.query_items || [],
-            3
-        );
-
-        if (queryWordScores.length > 0) {
-            updateUserMessageWithCaptum(
-                userMessageId,
-                message,
-                { word_scores: queryWordScores }
-            );
-        }
 
         updateMessage(
             loadingId,
@@ -1283,6 +1299,18 @@ async function sendMessage(message, userMessageId) {
                 retrieval_debug: retrievalDebug
             }
         );
+
+        if (xaiData?.status === 'pending') {
+            void completeXaiAnalysis({
+                message,
+                userMessageId,
+                assistantMessageDomId: loadingId,
+                assistantMessageId,
+                conversationId,
+                answer,
+                retrievalDebug
+            });
+        }
 
         await refreshConversationList();
     } catch (error) {
@@ -1300,6 +1328,97 @@ async function sendMessage(message, userMessageId) {
         setTimeout(() => {
             scrollToBottom();
         }, 100);
+    }
+}
+
+
+async function completeXaiAnalysis({
+    message,
+    userMessageId,
+    assistantMessageDomId,
+    assistantMessageId,
+    conversationId,
+    answer,
+    retrievalDebug
+}) {
+    let xaiData;
+
+    try {
+        const captumData = await callCaptumAPI(
+            message,
+            conversationId,
+            assistantMessageId
+        );
+        xaiData = captumData.xai || null;
+
+        if (!xaiData || typeof xaiData !== 'object') {
+            throw new Error('XAI 응답 형식이 올바르지 않습니다.');
+        }
+    } catch (error) {
+        console.error('XAI 후속 분석 오류:', error);
+
+        if (
+            currentConversationId === conversationId &&
+            document.getElementById(assistantMessageDomId)
+        ) {
+            updateMessage(
+                assistantMessageDomId,
+                answer,
+                message,
+                {
+                    xai: {
+                        type: 'document_ablation',
+                        status: 'error',
+                        items: [],
+                        query_items: [],
+                        summary: '답변 근거 분석을 불러오지 못했습니다.',
+                        query_summary: '질문 핵심어 분석 결과가 없습니다.'
+                    },
+                    retrieval_debug: retrievalDebug
+                }
+            );
+        }
+
+        return;
+    }
+
+    if (currentConversationId !== conversationId) return;
+
+    if (!document.getElementById(assistantMessageDomId)) {
+        try {
+            await loadCurrentConversation();
+            await refreshConversationList();
+        } catch (refreshError) {
+            console.warn('XAI 완료 후 화면 갱신 오류:', refreshError);
+        }
+        return;
+    }
+
+    const queryWordScores = buildWordScoresFromQueryItems(
+        message,
+        xaiData?.query_items || [],
+        3
+    );
+
+    if (queryWordScores.length > 0) {
+        updateUserMessageWithCaptum(
+            userMessageId,
+            message,
+            { word_scores: queryWordScores }
+        );
+    }
+
+    updateMessage(
+        assistantMessageDomId,
+        answer,
+        message,
+        { xai: xaiData, retrieval_debug: retrievalDebug }
+    );
+
+    try {
+        await refreshConversationList();
+    } catch (refreshError) {
+        console.warn('XAI 완료 후 대화목록 갱신 오류:', refreshError);
     }
 }
 

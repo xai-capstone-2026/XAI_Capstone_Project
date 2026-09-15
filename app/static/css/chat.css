@@ -815,6 +815,28 @@ body {
     border-top: 1px dashed rgba(148, 163, 184, 0.35);
 }
 
+.xai-loading-status,
+.xai-error-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.xai-loading-status {
+    color: #64748b;
+}
+
+.xai-loading-status i {
+    color: #2563eb;
+}
+
+.xai-error-status,
+.xai-error-status i {
+    color: #b91c1c;
+}
+
 .delete-modal {
     position: fixed;
     inset: 0;
@@ -1006,20 +1028,6 @@ body {
     border: 1px solid rgba(148, 163, 184, 0.16);
     line-height: 1.7;
     font-size: 14px;
-}
-
-.heat-strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
-.heat-strip__token {
-    padding: 8px 10px;
-    border-radius: 10px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #0f172a;
 }
 
 .bar-chart {
@@ -1254,26 +1262,6 @@ body {
     color: #64748b;
     font-size: 12px;
     line-height: 1.6;
-}
-
-.xai-note-section {
-    border-top: 1px dashed rgba(148, 163, 184, 0.35);
-    padding-top: 14px;
-}
-
-.xai-note {
-    padding: 12px 14px;
-    border-radius: 14px;
-    background: #f8fafc;
-    border: 1px solid rgba(148, 163, 184, 0.16);
-    color: #475569;
-    font-size: 12px;
-    line-height: 1.7;
-}
-
-.xai-note strong {
-    color: #1e40af;
-    font-weight: 800;
 }
 
 .markdown-body {
@@ -1685,7 +1673,6 @@ body {
 
     .xai-info-box,
     .xai-summary,
-    .xai-note,
     .xai-empty {
         font-size: 11px;
     }
