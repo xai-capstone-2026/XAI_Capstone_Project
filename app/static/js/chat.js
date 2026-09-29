@@ -1492,21 +1492,21 @@ exampleChips.forEach((chip) => {
         const chipText = chip.textContent.trim();
         let template = '';
 
-        switch (chipText) {
+                switch (chipText) {
             case '자격증 지원':
-                template = `자격증 지원 프로그램이 궁금해.\n지역:\n나이:\n취업 여부:`;
+                template = '[ 지역 ]에 거주하는 [ 나이 ]살을 위한 자격증 지원 프로그램이 궁금해.';
                 break;
             case '월세 지원':
-                template = `월세 지원 정책에 대해 알려줘.\n지역:\n나이:\n소득수준:`;
+                template = '[ 지역 ]에 거주하는 [ 나이 ]살이고 월 소득은 [ 금액 ]원이야. 받을 수 있는 월세 지원 정책이 궁금해.';
                 break;
             case '취업 지원':
-                template = `취업 지원 프로그램에 대해 알려줘.\n관심 직무:\n지역:\n나이:\n희망 기업 규모:`;
+                template = '[ 지역 ]에 거주하는 [ 나이 ]살이고 [ 관심 직무 ] 분야의 [ 희망 기업 규모 ] 기업에 취업하고 싶어. 받을 수 있는 취업 지원 프로그램이 궁금해.';
                 break;
             case '창업 지원':
-                template = `창업 지원금에 대해 궁금해.\n나이:\n희망 창업 분야:\n사업자 등록 여부:`;
+                template = '[ 나이 ]살이고 [ 창업 분야 ] 분야에서 창업을 준비하고 있어. 사업자 등록 여부는 [ 등록 전/등록 완료 ]인데, 받을 수 있는 창업 지원금이 궁금해.';
                 break;
             case '자산 형성':
-                template = `자산 형성 지원 정책이 궁금해.\n현재 직업:\n월 평균 소득:\n거주 지역:\n중위소득 비율:`;
+                template = '[ 지역 ]에 거주하고 현재 [ 직업 ]이야. 월평균 소득은 [ 금액 ]원인데, 받을 수 있는 자산 형성 지원 정책이 궁금해.';
                 break;
             default:
                 template = `${chipText} 관련 정책 알려줘.`;
